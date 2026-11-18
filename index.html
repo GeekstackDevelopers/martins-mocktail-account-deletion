@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your Martin's Mocktail account</title>
+<meta name="description" content="Request deletion of your Martin's Mocktail account and data.">
+<style>
+  :root {
+    --navy: #022E3B; --orange: #F59E2A; --red: #C62828;
+    --bg: #F7F5F0; --card: #FFFFFF; --text: #1C2B30; --muted: #5E6E73; --line: #E3E0D8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center; padding: 40px 16px;
+  }
+  main { width: 100%; max-width: 440px; }
+  h1 { color: var(--navy); font-size: 26px; margin: 0 0 6px; }
+  .brand { color: var(--orange); font-weight: 700; letter-spacing: .08em; font-size: 13px; text-transform: uppercase; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px; margin-top: 20px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .phone { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .phone span { padding: 12px; background: var(--bg); color: var(--muted); }
+  input { width: 100%; border: 1px solid var(--line); border-radius: 10px; padding: 12px; font: inherit; }
+  .phone input { border: 0; border-radius: 0; }
+  input:focus, .phone:focus-within { outline: 2px solid var(--orange); outline-offset: 1px; }
+  .phone input:focus { outline: none; }
+  button {
+    width: 100%; margin-top: 16px; padding: 13px; border: 0; border-radius: 10px;
+    background: var(--navy); color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.danger { background: var(--red); }
+  button.link { background: none; color: var(--navy); margin-top: 8px; padding: 6px; text-decoration: underline; }
+  button:disabled { opacity: .55; cursor: default; }
+  .msg { margin-top: 14px; font-size: 14px; }
+  .err { color: var(--red); }
+  .muted { color: var(--muted); font-size: 14px; }
+  ul { padding-left: 20px; margin: 8px 0 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div class="brand">Martin's Mocktail</div>
+  <h1>Delete your account</h1>
+  <p class="muted">Verify your mobile number and we'll schedule your account for deletion.
+    You can also do this in the app under <b>Account → Delete account</b>.</p>
+
+  <!-- Step 1: phone -->
+  <form class="card" id="step-phone">
+    <label for="phone">Mobile number</label>
+    <div class="phone"><span>+91</span>
+      <input id="phone" inputmode="numeric" autocomplete="tel-national" maxlength="10" placeholder="98765 43210" required>
+    </div>
+    <button type="submit">Send OTP</button>
+    <div class="msg err" role="alert"></div>
+  </form>
+
+  <!-- Step 2: OTP + confirm -->
+  <form class="card" id="step-otp" hidden>
+    <label for="otp">Enter the OTP sent to <span id="otp-phone"></span></label>
+    <input id="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code" required>
+    <p class="muted"><b>What gets deleted:</b></p>
+    <ul class="muted">
+      <li>You're signed out on every device right away.</li>
+      <li>Your profile, wallet credit, rewards, Club membership and juice plan are removed after 30 days.</li>
+      <li>Signing in to the app before then cancels the deletion.</li>
+    </ul>
+    <button type="submit" class="danger">Verify &amp; delete account</button>
+    <button type="button" class="link" id="resend" disabled>Resend OTP</button>
+    <button type="button" class="link" id="change">Use a different number</button>
+    <div class="msg err" role="alert"></div>
+  </form>
+
+  <!-- Step 3: result -->
+  <div class="card" id="step-done" hidden>
+    <h2 id="done-title" style="margin:0 0 8px;color:var(--navy);font-size:20px"></h2>
+    <p id="done-text" style="margin:0"></p>
+  </div>
+</main>
+
+<script>
+const API = 'https://martins-mocktail-backend.onrender.com/v1/';
+const $ = (id) => document.getElementById(id);
+let phone = '', requestId = '', resendTimer;
+
+async function call(path, { method = 'POST', body, token } = {}) {
+  let res;
+  try {
+    res = await fetch(API + path, {
+      method,
+      headers: {
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: 'Bearer ' + token } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error("Couldn't reach the server. Check your connection and try again.");
+  }
+  const data = res.status === 204 ? null : await res.json().catch(() => null);
+  if (!res.ok) {
+    const e = data?.error ?? data ?? {};
+    const fallback = {
+      otp_invalid: 'That OTP is wrong or has expired.',
+      rate_limited: 'Too many attempts. Please wait a minute and try again.',
+      account_blocked: 'This account is blocked. Please contact the café.',
+    }[e.code];
+    throw new Error(e.message || fallback || 'Something went wrong (' + res.status + '). Please try again.');
+  }
+  return data;
+}
+
+function busy(form, on, label) {
+  const btn = form.querySelector('button[type=submit]');
+  btn.disabled = on;
+  if (label) btn.textContent = label;
+}
+const showErr = (form, text) => (form.querySelector('.err').textContent = text || '');
+
+function show(id) {
+  for (const s of ['step-phone', 'step-otp', 'step-done']) $(s).hidden = s !== id;
+}
+
+function startResendCountdown(seconds) {
+  clearInterval(resendTimer);
+  let left = seconds || 30;
+  const btn = $('resend');
+  btn.disabled = true;
+  const tick = () => {
+    if (left <= 0) { clearInterval(resendTimer); btn.disabled = false; btn.textContent = 'Resend OTP'; return; }
+    btn.textContent = 'Resend OTP in ' + left-- + 's';
+  };
+  tick();
+  resendTimer = setInterval(tick, 1000);
+}
+
+async function sendOtp() {
+  const r = await call('auth/otp', { body: { phone } });
+  requestId = r.requestId;
+  startResendCountdown(r.resendIn);
+}
+
+$('step-phone').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const form = ev.currentTarget;
+  phone = $('phone').value.replace(/\D/g, '').slice(-10);
+  if (!/^[6-9]\d{9}$/.test(phone)) return showErr(form, 'Enter a valid 10-digit mobile number.');
+  showErr(form);
+  busy(form, true, 'Sending…');
+  try {
+    await sendOtp();
+    $('otp-phone').textContent = '+91 ' + phone;
+    $('otp').value = '';
+    show('step-otp');
+    $('otp').focus();
+  } catch (e) {
+    showErr(form, e.message);
+  } finally {
+    busy(form, false, 'Send OTP');
+  }
+});
+
+$('step-otp').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const form = ev.currentTarget;
+  const code = $('otp').value.replace(/\D/g, '');
+  if (code.length < 4) return showErr(form, 'Enter the OTP from the SMS.');
+  showErr(form);
+  busy(form, true, 'Deleting…');
+  try {
+    const v = await call('auth/verify', { body: { requestId, code } });
+    // There's no "does this number exist" endpoint, and verifying signs the
+    // number up if it's new. So a brand-new sign-up means there was no
+    // account: remove the one we just created and say so.
+    const r = await call('me', { method: 'DELETE', token: v.accessToken });
+    clearInterval(resendTimer);
+    if (v.isNew) {
+      $('done-title').textContent = 'No account found';
+      $('done-text').textContent = 'There is no Martin\'s Mocktail account for +91 ' + phone + '. Nothing to delete.';
+    } else {
+      const after = r?.deleteAfter ? new Date(r.deleteAfter) : null;
+      $('done-title').textContent = 'Deletion scheduled';
+      $('done-text').textContent =
+        'You have been signed out on every device. Your account and data will be deleted' +
+        (after ? ' on ' + after.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : ' within 30 days') +
+        '. If you change your mind, just sign in to the app before then.';
+    }
+    show('step-done');
+  } catch (e) {
+    showErr(form, e.message);
+    busy(form, false, 'Verify & delete account');
+  }
+});
+
+$('resend').addEventListener('click', async () => {
+  const form = $('step-otp');
+  showErr(form);
+  try { await sendOtp(); } catch (e) { showErr(form, e.message); }
+});
+
+$('change').addEventListener('click', () => {
+  clearInterval(resendTimer);
+  show('step-phone');
+  $('phone').focus();
+});
+</script>
+</body>
+</html>
